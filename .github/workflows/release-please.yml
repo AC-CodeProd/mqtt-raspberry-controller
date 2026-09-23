@@ -1,0 +1,168 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Propose or create release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Open or update the draft release pull request
+        id: release-pr
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+
+      - name: Validate the generated release pull request
+        if: steps.release-pr.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR: ${{ steps.release-pr.outputs.pr }}
+        run: |
+          set -euo pipefail
+          branch=$(jq -r '.headBranchName' <<<"$RELEASE_PR")
+          base=$(jq -r '.baseBranchName' <<<"$RELEASE_PR")
+          number=$(jq -r '.number' <<<"$RELEASE_PR")
+          reported_sha=$(jq -r '.sha // empty' <<<"$RELEASE_PR")
+          test "$base" = main
+          test "$number" -gt 0
+          case "$branch" in
+            release-please--branches--main*) ;;
+            *) echo "unexpected Release Please branch: $branch" >&2; exit 1 ;;
+          esac
+
+          pr=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json baseRefName,headRefName,headRefOid,isDraft,state)
+          test "$(jq -r '.state' <<<"$pr")" = OPEN
+          test "$(jq -r '.baseRefName' <<<"$pr")" = main
+          test "$(jq -r '.headRefName' <<<"$pr")" = "$branch"
+          sha=$(jq -r '.headRefOid' <<<"$pr")
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "$reported_sha" ]]; then
+            test "$reported_sha" = "$sha"
+          fi
+
+          if [[ "$(jq -r '.isDraft' <<<"$pr")" != true ]]; then
+            gh pr ready "$number" --repo "$GITHUB_REPOSITORY" --undo
+          fi
+
+          previous_run=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow ci.yml \
+            --branch "$branch" \
+            --event workflow_dispatch \
+            --limit 100 \
+            --json databaseId \
+            --jq 'map(.databaseId) | max // 0')
+          gh workflow run ci.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$branch" \
+            -f expected_sha="$sha"
+
+          run_id=
+          for _ in {1..30}; do
+            run_id=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow ci.yml \
+              --branch "$branch" \
+              --event workflow_dispatch \
+              --limit 100 \
+              --json databaseId,headSha \
+              --jq "[.[] | select(.headSha == \"$sha\" and .databaseId > $previous_run)] | map(.databaseId) | max // empty")
+            [[ -z "$run_id" ]] || break
+            sleep 2
+          done
+          test -n "$run_id"
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
+
+          pr=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json headRefOid,isDraft,state)
+          test "$(jq -r '.state' <<<"$pr")" = OPEN
+          test "$(jq -r '.headRefOid' <<<"$pr")" = "$sha"
+          test "$(jq -r '.isDraft' <<<"$pr")" = true
+          gh pr ready "$number" --repo "$GITHUB_REPOSITORY"
+
+      - name: Gate a merged release pull request
+        id: release-gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls")
+          count=$(jq --arg sha "$GITHUB_SHA" '[.[] | select(
+            .merged_at != null and
+            .merge_commit_sha == $sha and
+            .base.ref == "main" and
+            (.head.ref | startswith("release-please--branches--main"))
+          )] | length' <<<"$prs")
+          if [[ "$count" = 0 ]]; then
+            echo 'release=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$count" = 1
+
+          release_pr=$(jq --arg sha "$GITHUB_SHA" '[.[] | select(
+            .merged_at != null and
+            .merge_commit_sha == $sha and
+            .base.ref == "main" and
+            (.head.ref | startswith("release-please--branches--main"))
+          )][0]' <<<"$prs")
+          branch=$(jq -r '.head.ref' <<<"$release_pr")
+          head_sha=$(jq -r '.head.sha' <<<"$release_pr")
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+
+          run=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow ci.yml \
+            --branch "$branch" \
+            --event workflow_dispatch \
+            --limit 100 \
+            --json databaseId,headSha,status,conclusion,url \
+            --jq "[.[] | select(.headSha == \"$head_sha\")] | sort_by(.databaseId) | last // empty")
+          test -n "$run"
+          test "$(jq -r '.status' <<<"$run")" = completed
+          test "$(jq -r '.conclusion' <<<"$run")" = success
+          printf 'verified release PR CI: %s\n' "$(jq -r '.url' <<<"$run")"
+          echo 'release=true' >>"$GITHUB_OUTPUT"
+
+      - name: Create tag and temporary release draft
+        id: release
+        if: steps.release-gate.outputs.release == 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+  release-assets:
+    name: Build and attach verified assets
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.release-please.outputs.version }}
+      tag: ${{ needs.release-please.outputs.tag_name }}
+      commit: ${{ needs.release-please.outputs.sha }}

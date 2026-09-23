@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "draft": true,
+  "draft-pull-request": true,
+  "force-tag-creation": true,
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "package-name": "mqtt-raspberry-controller",
+      "changelog-path": "CHANGELOG.md",
+      "changelog-sections": [
+        { "type": "feat", "section": "Features" },
+        { "type": "fix", "section": "Bug Fixes" },
+        { "type": "perf", "section": "Performance" },
+        { "type": "build", "section": "Build and Dependencies" },
+        { "type": "ci", "section": "Continuous Integration" },
+        { "type": "docs", "section": "Documentation" },
+        { "type": "refactor", "section": "Code Refactoring" },
+        { "type": "test", "section": "Tests" }
+      ]
+    }
+  }
+}

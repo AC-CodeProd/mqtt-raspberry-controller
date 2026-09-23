@@ -1,0 +1,12 @@
+# Exact least-privilege ACL for configs/config.example.yaml.
+# Keep pattern matching disabled: add one exact line for each new entity/action.
+user mqtt-raspberry-controller
+topic read mqtt-raspberry-controller/example/relay/set
+topic read mqtt-raspberry-controller/example/announce/press
+topic write mqtt-raspberry-controller/example/status
+topic write mqtt-raspberry-controller/example/relay/state
+topic write mqtt-raspberry-controller/example/contact/state
+topic write mqtt-raspberry-controller/example/events
+topic write homeassistant/switch/mqtt-raspberry-controller-example/relay/config
+topic write homeassistant/button/mqtt-raspberry-controller-example/announce/config
+topic write homeassistant/binary_sensor/mqtt-raspberry-controller-example/contact/config

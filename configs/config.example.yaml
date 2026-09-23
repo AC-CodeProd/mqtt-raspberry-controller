@@ -1,0 +1,87 @@
+mqtt:
+  broker: tls://mqtt.example.net:8883
+  username: mqtt-raspberry-controller
+  password_file: "${MQTT_PASSWORD_FILE}"
+  # Plaintext brokers outside literal loopback require this explicit opt-in:
+  # allow_insecure_transport: true
+  # Anonymous operation also requires an explicit allow_unauthenticated: true.
+  tls:
+    # Leave ca_file empty to use system roots, or set a custom CA bundle.
+    # ca_file: "${MQTT_CA_FILE}"
+    # cert_file: "${MQTT_CLIENT_CERT_FILE}"
+    # key_file: "${MQTT_CLIENT_KEY_FILE}"
+    # server_name: mqtt.example.net
+    min_version: "1.2"
+  client_id: mqtt-raspberry-controller-example
+  base_topic: mqtt-raspberry-controller/example
+  qos: 1
+  keep_alive: 30s
+  connect_timeout: 10s
+  discovery:
+    enabled: true
+    prefix: homeassistant
+    state_file: /var/lib/mqtt-raspberry-controller/discovery-state.json
+
+device:
+  id: mqtt-raspberry-controller-example
+  name: MQTT Raspberry Controller Example
+  manufacturer: mqtt-raspberry-controller
+  model: mqtt-raspberry-controller
+
+gpio:
+  outputs:
+    relay:
+      chip: gpiochip0
+      line: 17
+      active_low: false
+      initial: false
+  inputs:
+    contact:
+      chip: gpiochip0
+      line: 27
+      active_low: false
+      bias: pull_up
+      debounce: 50ms
+
+entities:
+  - id: relay
+    type: switch
+    name: Example Relay
+    icon: mdi:electric-switch
+    state:
+      type: gpio
+      gpio: relay
+    on:
+      - type: gpio
+        gpio: relay
+        value: true
+    off:
+      - type: gpio
+        gpio: relay
+        value: false
+
+  - id: announce
+    type: button
+    name: Example Announcement
+    icon: mdi:message-alert
+    press:
+      - type: command
+        command: /usr/bin/logger
+        args:
+          - mqtt-raspberry-controller example button pressed
+        timeout: 5s
+      - type: delay
+        duration: 100ms
+      - type: mqtt
+        topic: mqtt-raspberry-controller/example/events
+        payload: button-pressed
+        qos: 1
+        retain: false
+
+  - id: contact
+    type: binary_sensor
+    name: Example Contact
+    device_class: opening
+    source:
+      type: gpio
+      gpio: contact

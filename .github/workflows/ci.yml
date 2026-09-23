@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full commit SHA that this dispatched run must verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  STATICCHECK_VERSION: v0.8.1
+  GOVULNCHECK_VERSION: v1.8.0
+  MQTT_TEST_BROKER: tcp://127.0.0.1:1883
+
+jobs:
+  verify:
+    name: Go 1.26.8 / linux-amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify dispatched commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+
+      - name: Set up release Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Confirm exact Go version
+        run: test "$(go env GOVERSION)" = "go$(cat .go-version)"
+
+      - name: Start pinned Mosquitto
+        run: |
+          docker run --detach --rm --name mqtt-raspberry-controller-test \
+            --publish 127.0.0.1:1883:1883 \
+            --volume "$GITHUB_WORKSPACE/packaging/mosquitto/test.conf:/mosquitto/config/mosquitto.conf:ro" \
+            eclipse-mosquitto:2.0.20@sha256:21421af7b32bf9ce508e9090c8eb13bb81f410ca778dc205506180a6f862d0eb
+          timeout 30 bash -c 'until (echo > /dev/tcp/127.0.0.1/1883) 2>/dev/null; do sleep 0.25; done'
+
+      - name: Check formatting
+        run: make fmt-check
+
+      - name: Validate release scripts
+        run: |
+          sh -n scripts/*.sh
+          ./scripts/validate-version.sh 1.2.3
+          ./scripts/validate-version.sh 1.2.3-rc.1+build.5
+          for invalid in v1.2.3 01.2.3 1.02.3 1.2.03 1.2 1.2.3-01; do
+            if ./scripts/validate-version.sh "$invalid"; then
+              echo "accepted invalid version: $invalid" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check module files
+        run: make tidy-check
+
+      - name: Vet
+        run: make vet
+
+      - name: Run ordinary tests
+        env:
+          MQTT_TEST_BROKER: ""
+        run: make test
+
+      - name: Run broker integration tests with race detector and coverage
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Write coverage summary
+        run: go tool cover -func=coverage.out | tee coverage.txt
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-linux-amd64
+          path: |
+            coverage.out
+            coverage.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Run staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@"$STATICCHECK_VERSION"
+          staticcheck ./...
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@"$GOVULNCHECK_VERSION"
+          govulncheck ./...
+
+      - name: Build static versioned binary
+        run: |
+          version="ci-${GITHUB_SHA}"
+          CGO_ENABLED=0 make build VERSION="$version"
+          test "$(./bin/mqtt-raspberry-controller --version)" = "$version"
+          test "$(go version -m ./bin/mqtt-raspberry-controller | awk '$1 == "build" && $2 == "CGO_ENABLED=0" { print $2 }')" = "CGO_ENABLED=0"
+
+      - name: Verify packaging
+        run: make packaging-check
+
+      - name: Show broker logs
+        if: failure()
+        run: docker logs mqtt-raspberry-controller-test
+
+      - name: Stop broker
+        if: always()
+        run: docker stop mqtt-raspberry-controller-test || true

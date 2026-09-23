@@ -1,0 +1,2 @@
+# Grant the service access to the one GPIO chip allowed by its systemd unit.
+SUBSYSTEM=="gpio", KERNEL=="gpiochip0", OWNER="root", GROUP="gpio", MODE="0660"

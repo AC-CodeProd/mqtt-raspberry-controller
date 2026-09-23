@@ -1,0 +1,43 @@
+# Keep the repository allowlisted so local and generated files stay untracked.
+*
+
+# Repository root files.
+!/.gitignore
+!/*.go
+!/.air.toml
+!/package.json
+!/pnpm-lock.yaml
+!/go.mod
+!/go.sum
+!/Makefile
+!/README.md
+!/README_FR.md
+!/LICENSE
+!/.go-version
+!/.release-please-manifest.json
+!/release-please-config.json
+
+# Source directories and Go files.
+!*/
+!*.go
+
+# Distributable configuration examples.
+!/configs/
+!/configs/*.example.yaml
+
+# Packaging assets.
+!/packaging/
+!/packaging/**
+
+# CI workflows.
+!/.github/
+!/.github/workflows/
+!/.github/workflows/*.yml
+!/.github/workflows/*.yaml
+!/.github/dependabot.yml
+
+# Release scripts and documentation.
+!/scripts/
+!/scripts/*.sh
+!/docs/
+!/docs/*.md
