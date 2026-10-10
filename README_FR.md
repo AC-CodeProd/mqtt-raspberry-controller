@@ -72,7 +72,7 @@ Aucun abonnement au topic de naissance de Home Assistant n'est nécessaire. Home
 
 ## Compilation
 
-La compatibilité du code source commence avec Go 1.24, car `github.com/eclipse/paho.mqtt.golang v1.5.1` l'exige. La CI et les versions publiées utilisent exactement la chaîne d'outils de sécurité prise en charge définie dans `.go-version` (actuellement Go 1.26.8).
+La compatibilité du code source commence avec Go 1.24, car `github.com/eclipse/paho.mqtt.golang v1.5.1` l'exige. La CI et les versions publiées utilisent exactement la chaîne d'outils de sécurité prise en charge définie dans `.go-version` (actuellement Go 1.26.9).
 
 ```bash
 go mod download

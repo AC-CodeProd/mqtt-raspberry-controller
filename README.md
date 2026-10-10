@@ -72,7 +72,7 @@ No Home Assistant birth-topic subscription is needed. Home Assistant receives th
 
 ## Build
 
-Source compatibility starts at Go 1.24 because `github.com/eclipse/paho.mqtt.golang v1.5.1` requires it. CI and releases use the exact supported security toolchain in `.go-version` (currently Go 1.26.8).
+Source compatibility starts at Go 1.24 because `github.com/eclipse/paho.mqtt.golang v1.5.1` requires it. CI and releases use the exact supported security toolchain in `.go-version` (currently Go 1.26.9).
 
 ```bash
 go mod download
