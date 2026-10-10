@@ -41,7 +41,7 @@ If Release Please is unavailable, a maintainer may create and push an annotated 
 ```bash
 version=X.Y.Z
 syft=$(./scripts/install-syft.sh "$PWD/.cache/syft-1.43.0")
-GOTOOLCHAIN=go1.26.8 SYFT="$syft" make release VERSION="$version"
+GOTOOLCHAIN=go1.26.9 SYFT="$syft" make release VERSION="$version"
 make release-verify VERSION="$version"
 ```
 
