@@ -21,7 +21,7 @@ env:
 
 jobs:
   verify:
-    name: Go 1.26.8 / linux-amd64
+    name: Go 1.26.9 / linux-amd64
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
