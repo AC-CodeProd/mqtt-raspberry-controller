@@ -218,6 +218,57 @@ Créez ce répertoire en le faisant appartenir à `mqtt-raspberry-controller`, o
 
 Avec systemd 252, `systemd-analyze security --offline=yes packaging/systemd/mqtt-raspberry-controller.service` indique un score d'exposition de **3.2 (`OK`)**. Les scores varient selon les versions de systemd ; GPIO et MQTT nécessitent les exceptions intentionnelles relatives au périphérique, au groupe supplémentaire et au réseau.
 
+### Exemple : bouton de redémarrage
+
+Sur un système utilisant systemd-logind et Polkit, un bouton MQTT peut demander un redémarrage normal du Raspberry Pi sans exécuter le contrôleur en root. Conservez `NoNewPrivileges=yes` et l'isolation existante ; n'utilisez pas `sudo reboot` dans une action de commande.
+
+Vérifiez le chemin de l'exécutable et créez une règle Polkit appartenant à root :
+
+```bash
+command -v systemctl
+sudo install -d -m 0755 /etc/polkit-1/rules.d
+sudoedit /etc/polkit-1/rules.d/50-mqtt-raspberry-controller-reboot.rules
+```
+
+Ajoutez la règle suivante dans ce fichier :
+
+```javascript
+polkit.addRule(function(action, subject) {
+    if (subject.user === "mqtt-raspberry-controller" &&
+        (action.id === "org.freedesktop.login1.reboot" ||
+         action.id === "org.freedesktop.login1.reboot-multiple-sessions")) {
+        return polkit.Result.YES;
+    }
+});
+```
+
+Cette règle autorise uniquement le compte dédié du service à demander un redémarrage, y compris lorsque d'autres sessions (comme SSH) sont ouvertes. Elle n'autorise ni l'arrêt, ni la gestion générale des services, ni le contournement des inhibiteurs d'arrêt. L'autorisation s'applique à tous les processus exécutés sous ce compte : ne le partagez pas avec d'autres applications. Polkit et systemd-logind doivent être installés et actifs ; n'affaiblissez pas l'isolation si l'autorisation échoue.
+
+Si `command -v systemctl` retourne `/usr/bin/systemctl`, ajoutez ce bouton à la liste `entities` existante dans `/etc/mqtt-raspberry-controller/config.yaml` (ne créez pas une seconde clé `entities`) :
+
+```yaml
+  - id: reboot
+    type: button
+    name: Redémarrer le Raspberry Pi
+    icon: mdi:restart
+    press:
+      - type: command
+        command: /usr/bin/systemctl
+        args:
+          - "--no-ask-password"
+          - "reboot"
+        timeout: 10s
+```
+
+Si l'exécutable est installé ailleurs, utilisez son chemin absolu réel. Rechargez ensuite le contrôleur :
+
+```bash
+sudo systemctl restart mqtt-raspberry-controller
+sudo journalctl -u mqtt-raspberry-controller -n 30 --no-pager
+```
+
+**Attention :** appuyer sur ce bouton redémarre réellement la machine et déconnecte SSH. N'exécutez pas la commande de redémarrage simplement pour tester les permissions. Limitez l'accès au topic de commande MQTT de cette entité avec les ACL du broker ; ne publiez jamais de messages de commande conservés.
+
 ### Test rapide root sur Raspberry Pi
 
 `packaging/tests/smoke-raspberry-pi.sh` vérifie l'unité installée, les propriétaires et modes requis de la configuration et du périphérique, l'UID réel du service, les journaux des switches, sorties et lignes de l'invocation systemd actuelle, les états MQTT `online`/état/`offline`, ainsi qu'un véritable basculement GPIO OFF/ON avec restauration de l'état initial. Les identifiants installés restent fournis par le `LoadCredential=` de l'unité, tandis que les identifiants du client de test proviennent uniquement des variables d'environnement `MQTT_RASPBERRY_SMOKE_*` et sont placés dans une configuration cliente Mosquitto temporaire privée. Le nom de sortie explicite doit être le nom `gpio.outputs` référencé par l'état GPIO du switch testé. Chaque opération Mosquitto, y compris le nettoyage après un échec, possède un délai d'expiration ; la restauration attend un acquittement d'état actif correspondant avant que le démon puisse être arrêté. Si la restauration ne peut pas être confirmée, un démon démarré par le test est délibérément laissé en fonctionnement afin de ne pas interrompre les travaux de restauration en attente, et le test échoue avec un avertissement exigeant une intervention manuelle. Le script arrête et redémarre le service canonique ; ne l'exécutez donc que sur une sortie de test sûre :
