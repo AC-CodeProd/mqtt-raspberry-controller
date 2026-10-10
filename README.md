@@ -218,6 +218,57 @@ Create that directory owned by `mqtt-raspberry-controller`, or install action ex
 
 On systemd 252, `systemd-analyze security --offline=yes packaging/systemd/mqtt-raspberry-controller.service` reports an exposure score of **3.2 (`OK`)**. Scores vary with systemd versions; GPIO and MQTT require the intentional device, supplementary-group, and network exceptions.
 
+### Example: reboot button
+
+On a system using systemd-logind and Polkit, a MQTT button can request a normal Raspberry Pi reboot without running the controller as root. Keep `NoNewPrivileges=yes` and the existing sandbox; do not use `sudo reboot` inside a command action.
+
+Check the executable path and create a root-owned Polkit rule:
+
+```bash
+command -v systemctl
+sudo install -d -m 0755 /etc/polkit-1/rules.d
+sudoedit /etc/polkit-1/rules.d/50-mqtt-raspberry-controller-reboot.rules
+```
+
+Add the following rule to that file:
+
+```javascript
+polkit.addRule(function(action, subject) {
+    if (subject.user === "mqtt-raspberry-controller" &&
+        (action.id === "org.freedesktop.login1.reboot" ||
+         action.id === "org.freedesktop.login1.reboot-multiple-sessions")) {
+        return polkit.Result.YES;
+    }
+});
+```
+
+This authorizes only the dedicated service account to request reboot, including when other sessions (such as SSH) are open. It does not authorize shutdown, general service management, or bypassing shutdown inhibitors. The permission applies to every process running under that account: do not share it with unrelated applications. Polkit and systemd-logind must be installed and running; do not weaken the sandbox if authorization fails.
+
+If `command -v systemctl` returns `/usr/bin/systemctl`, append this button to the existing `entities` list in `/etc/mqtt-raspberry-controller/config.yaml` (do not create a second `entities` key):
+
+```yaml
+  - id: reboot
+    type: button
+    name: Reboot Raspberry Pi
+    icon: mdi:restart
+    press:
+      - type: command
+        command: /usr/bin/systemctl
+        args:
+          - "--no-ask-password"
+          - "reboot"
+        timeout: 10s
+```
+
+If the executable is installed elsewhere, use its actual absolute path. Then reload the controller:
+
+```bash
+sudo systemctl restart mqtt-raspberry-controller
+sudo journalctl -u mqtt-raspberry-controller -n 30 --no-pager
+```
+
+**Warning:** pressing this button actually reboots the machine and disconnects SSH. Do not execute the reboot command merely to test permissions. Restrict access to this entity's MQTT command topic using broker ACLs; never publish retained control messages.
+
 ### Raspberry Pi root smoke test
 
 `packaging/tests/smoke-raspberry-pi.sh` verifies the installed unit, required configuration/device owners and modes, actual service UID, current-systemd-invocation switch/output/line logs, MQTT `online`/state/`offline`, and a real GPIO OFF/ON toggle restored to its initial state. Installed credentials remain supplied by the unit's `LoadCredential=`, while smoke-client credentials come only from the `MQTT_RASPBERRY_SMOKE_*` environment into private temporary Mosquitto client configuration. The explicit output name must be the `gpio.outputs` name referenced by the tested switch's GPIO state. Every Mosquitto operation, including failure cleanup, has a timeout; restoration waits for a matching live state acknowledgement before the daemon may be stopped. If restoration cannot be confirmed, a daemon that the test started is deliberately left running so queued restoration work is not cut off, and the test fails with a manual-intervention warning. The script stops and restarts the canonical service, so run it only on a safe test output:
